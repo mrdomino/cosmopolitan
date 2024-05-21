@@ -7,60 +7,113 @@
 #include "libc/stdio/stdio.h"
 #include "libc/str/blake2.h"
 #include "libc/str/str.h"
+#include "libc/sysv/consts/at.h"
+#include "libc/sysv/consts/fileno.h"
 #include "libc/sysv/consts/o.h"
 #include "third_party/argon2/argon2.h"
 
-int main(int argc, char *argv[]) {
-  FILE *f;
-  char *p, *h;
-  uint32_t ctr;
-  int i, r, n, done, fd, dfd, lop;
-  char has[1024], pwd[1024], sel[8];
+/**
+ * Opens the passed path, given as a null-terminated list of path components. If
+ * a component names an individual directory and that directory does not exist,
+ * then it will be created.
+ */
+int vopentree(char *p, va_list va) {
+  int dd = AT_FDCWD, fd;
+  int lop;
+
+  do {
+    lop = 0;
+  restart:
+    if (-1 == (fd = openat(dd, p, O_DIRECTORY))) {
+      if (lop++) {
+        errx(2, "mkdir/open loop (%s)", p);
+      }
+      if (errno != ENOENT) {
+        err(2, "openat (%s)", p);
+      }
+      if (0 != mkdirat(dd, p, 0777)) {
+        err(2, "mkdirat (%s)", p);
+      }
+      goto restart;
+    }
+    (void)close(dd);
+    dd = fd;
+  } while ((p = va_arg(va, char *)));
+  return dd;
+}
+
+int opentree(char *p, ...) {
+  int rc;
+  va_list va;
+
+  va_start(va, p);
+  rc = vopentree(p, va);
+  va_end(va);
+  return rc;
+}
+
+int open_config(void) {
+  char *h;
 
   if ((h = getenv("XDG_CONFIG_HOME"))) {
-    if (-1 == (dfd = open(h, O_DIRECTORY))) {
-      err(2, "open");
+    return opentree(h, "pwtoy", NULL);
+  }
+  if ((h = getenv("HOME"))) {
+    return opentree(h, ".config", "pwtoy", NULL);
+  }
+  return -1;
+}
+
+ssize_t readinput(const char *prompt, char *buf, size_t len) {
+  size_t r, n = 0;
+  char *p, c;
+
+  fputs(prompt, stderr);
+  while (0 < (r = read(STDIN_FILENO, buf + n, len - n))) {
+    if ((p = memchr(buf + n, '\n', r))) {
+      return p - buf;
     }
-  } else if ((h = getenv("HOME"))) {
-    if (-1 == (fd = open(h, O_DIRECTORY))) {
-      err(2, "open");
-    }
-    if (-1 == (dfd = openat(fd, ".config", O_DIRECTORY))) {
-      err(2, "openat");
-    }
-    close(fd);
+    n += r;
+  }
+  if (-1 == r) {
+    return -1;
+  }
+  if (n < len) {
+    return n;
+  }
+  r = read(STDIN_FILENO, &c, 1);
+  if (-1 == r) {
+    return -1;
+  }
+  if (!r || c == '\n') {
+    return n;
+  }
+  errno = E2BIG;
+  return -1;
+}
+
+int main(int argc, char *argv[]) {
+  char *p;
+  size_t c;
+  FILE *f = 0;
+  uint32_t ctr;
+  int i, r, n, done, dd, fd, lop;
+  char has[1024], pwd[1024], sel[8];
+
+  if (-1 == (dd = open_config())) {
+    n = 0;
   } else {
-    errx(2, "missing home");
-  }
-  lop = 0;
-restart:
-  fd = openat(dfd, "pwtoy", O_DIRECTORY);
-  if (fd == -1) {
-    if (errno != ENOENT) {
+    if (-1 == (fd = openat(dd, "master.argon2", O_RDWR | O_CREAT, 0777))) {
       err(2, "openat");
     }
-    if (0 != mkdirat(dfd, "pwtoy", 0777)) {
-      err(2, "mkdirat");
+    (void)close(dd);
+    if (!(f = fdopen(fd, "r+"))) {
+      err(2, "fdopen");
     }
-    if (lop++) {
-      errx(2, "mkdir/open loop");
-    }
-    goto restart;
-  }
-  close(dfd);
-  dfd = fd;
-  if ((fd = openat(dfd, "master.argon2", O_RDWR | O_CREAT, 0777)) == -1) {
-    err(2, "openat");
-  }
-  close(dfd);
-
-  if (!(f = fdopen(fd, "r+"))) {
-    err(2, "fdopen");
-  }
-
-  if (!(n = fread(has, 1, sizeof(has) - 1, f))) {
-    if (ferror(f)) {
-      err(2, "fread");
+    if (!(n = fread(has, 1, sizeof(has) - 1, f))) {
+      if (ferror(f)) {
+        err(2, "fread");
+      }
     }
   }
   has[n] = 0;
@@ -70,9 +123,8 @@ restart:
   do {
     if (lop) {
       fprintf(stderr, "Password does not match.\n");
-    } else {
-      ++lop;
     }
+    lop += !lop;
     if (!(p = readpassphrase("> ", pwd, sizeof(pwd), 0))) {
       err(2, "readpassphrase");
     }
@@ -91,7 +143,7 @@ restart:
     }
   } while (!done);
 
-  if (!n) {
+  if (-1 != dd && !n) {
     if (0 != getentropy(sel, sizeof(sel))) {
       err(2, "getentropy");
     }
@@ -112,10 +164,22 @@ restart:
 
   fclose(f);
 
+  n = strlen(pwd) + 1;
+  if (argc > 1) {
+    if ((c = strlen(argv[1])) > sizeof(pwd) - n) {
+      errx(2, "Site too long");
+    }
+    memcpy(pwd + n, argv[1], c);
+  } else {
+    if (-1 == (c = readinput("Site> ", pwd + n, sizeof(pwd) - n))) {
+      err(2, "readinput");
+    }
+  }
+  n += c;
+
   bzero(sel, sizeof(sel));
 
-  /* TODO include metadata in the input to this hash */
-  r = argon2d_hash_raw(4, 1 << 16, 4, p, strlen(p), sel, sizeof(sel), has, 32);
+  r = argon2d_hash_raw(4, 1 << 16, 4, pwd, n, sel, sizeof(sel), has, 32);
   if (r != ARGON2_OK) {
     errx(2, "argon2d_hash_raw: %s", argon2_error_message(r));
   }
