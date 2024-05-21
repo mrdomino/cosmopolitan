@@ -19,22 +19,18 @@
  */
 int vopentree(char *p, va_list va) {
   int dd = AT_FDCWD, fd;
-  int lop;
 
   do {
-    lop = 0;
-  restart:
     if (-1 == (fd = openat(dd, p, O_DIRECTORY))) {
-      if (lop++) {
-        errx(2, "mkdir/open loop (%s)", p);
-      }
       if (errno != ENOENT) {
         err(2, "openat (%s)", p);
       }
       if (0 != mkdirat(dd, p, 0777)) {
         err(2, "mkdirat (%s)", p);
       }
-      goto restart;
+      if (-1 == (fd = openat(dd, p, O_DIRECTORY))) {
+        err(2, "openat (%s)", p);
+      }
     }
     (void)close(dd);
     dd = fd;
