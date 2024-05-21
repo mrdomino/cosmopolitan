@@ -1,6 +1,7 @@
 #include "libc/calls/calls.h"
 #include "libc/errno.h"
 #include "libc/log/bsd.h"
+#include "libc/paths.h"
 #include "libc/runtime/runtime.h"
 #include "libc/stdio/rand.h"
 #include "libc/stdio/readpassphrase.h"
@@ -32,7 +33,7 @@ int vopentree(char *p, va_list va) {
         err(2, "openat (%s)", p);
       }
     }
-    (void)close(dd);
+    close(dd);
     dd = fd;
   } while ((p = va_arg(va, char *)));
   return dd;
@@ -61,10 +62,19 @@ int open_config(void) {
 }
 
 ssize_t readinput(const char *prompt, char *buf, size_t len) {
-  size_t r, n = 0;
+  int fd;
   char *p, c;
+  size_t r, n = 0;
 
-  fputs(prompt, stderr);
+  if (isatty(STDIN_FILENO)) {
+    if (-1 == (fd = open(_PATH_TTY, O_WRONLY))) {
+      fd = STDERR_FILENO;
+    }
+    write(fd, prompt, strlen(prompt));
+    if (STDERR_FILENO != fd) {
+      close(fd);
+    }
+  }
   while (0 < (r = read(STDIN_FILENO, buf + n, len - n))) {
     if ((p = memchr(buf + n, '\n', r))) {
       return p - buf;
@@ -102,7 +112,7 @@ int main(int argc, char *argv[]) {
     if (-1 == (fd = openat(dd, "master.argon2", O_RDWR | O_CREAT, 0777))) {
       err(2, "openat");
     }
-    (void)close(dd);
+    close(dd);
     if (!(f = fdopen(fd, "r+"))) {
       err(2, "fdopen");
     }
