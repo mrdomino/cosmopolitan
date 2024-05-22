@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
   size_t c;
   FILE *f = 0;
   uint32_t ctr;
-  int i, r, n, done, dd, fd, lop;
+  int i, r, n, done, dd, fd, loop;
   char has[1024], pwd[1024], sel[8];
 
   if (-1 == (dd = open_config())) {
@@ -124,13 +124,13 @@ int main(int argc, char *argv[]) {
   }
   has[n] = 0;
 
-  lop = 0;
+  loop = 0;
   done = 0;
   do {
-    if (lop) {
+    if (loop) {
       fprintf(stderr, "Password does not match.\n");
     }
-    lop += !lop;
+    loop += !loop;
     if (!(p = readpassphrase("> ", pwd, sizeof(pwd), 0))) {
       err(2, "readpassphrase");
     }
