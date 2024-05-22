@@ -184,7 +184,6 @@ int main(int argc, char *argv[]) {
   n += c;
 
   bzero(sel, sizeof(sel));
-
   r = argon2d_hash_raw(4, 1 << 16, 4, pwd, n, sel, sizeof(sel), has, 32);
   if (r != ARGON2_OK) {
     errx(2, "argon2d_hash_raw: %s", argon2_error_message(r));
