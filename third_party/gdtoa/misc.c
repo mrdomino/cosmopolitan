@@ -30,7 +30,7 @@
 │                                                                              │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/calls.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/runtime/runtime.h"
 #include "libc/thread/thread.h"
 #include "libc/thread/tls.h"
@@ -129,12 +129,16 @@ __gdtoa_Balloc(int k, ThInfo **PTI)
 	} else {
 		x = 1 << k;
 		rv = malloc(sizeof(Bigint) + (x-1)*sizeof(ULong));
+		if (rv == NULL)
+			goto ret;
 		rv->k = k;
 		rv->maxwds = x;
 	}
+	rv->sign = rv->wds = 0;
+
+ret:
 	if (TI == &TI0)
 		__gdtoa_unlock();
-	rv->sign = rv->wds = 0;
 	return rv;
 }
 

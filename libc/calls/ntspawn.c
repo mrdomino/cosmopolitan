@@ -19,7 +19,7 @@
 #include "libc/proc/ntspawn.h"
 #include "libc/calls/struct/sigset.internal.h"
 #include "libc/calls/syscall_support-nt.internal.h"
-#include "libc/intrin/strace.internal.h"
+#include "libc/intrin/strace.h"
 #include "libc/nt/createfile.h"
 #include "libc/nt/enum/accessmask.h"
 #include "libc/nt/enum/creationdisposition.h"
@@ -39,6 +39,7 @@
 #include "libc/nt/struct/startupinfo.h"
 #include "libc/nt/struct/startupinfoex.h"
 #include "libc/proc/ntspawn.h"
+#include "libc/stdalign.h"
 #include "libc/str/str.h"
 #include "libc/sysv/errfuns.h"
 #ifdef __x86_64__
@@ -149,10 +150,10 @@ static textwindows int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
   // this code won't call malloc in practice
   bool32 ok;
   void *freeme = 0;
-  _Alignas(16) char memory[128];
+  alignas(16) char memory[128];
   size_t size = sizeof(memory);
   struct NtProcThreadAttributeList *alist = (void *)memory;
-  uint32_t items = !!a->opt_hParentProcess + !!a->opt_lpExplicitHandleList;
+  uint32_t items = !!a->opt_hParentProcess + !!a->dwExplicitHandleCount;
   ok = InitializeProcThreadAttributeList(alist, items, 0, &size);
   if (!ok && GetLastError() == kNtErrorInsufficientBuffer) {
     ok = !!(alist = freeme = ntspawn_malloc(size));
@@ -165,7 +166,7 @@ static textwindows int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
         alist, 0, kNtProcThreadAttributeParentProcess, &a->opt_hParentProcess,
         sizeof(a->opt_hParentProcess), 0, 0);
   }
-  if (ok && a->opt_lpExplicitHandleList) {
+  if (ok && a->dwExplicitHandleCount) {
     ok = UpdateProcThreadAttribute(
         alist, 0, kNtProcThreadAttributeHandleList, a->opt_lpExplicitHandleList,
         a->dwExplicitHandleCount * sizeof(*a->opt_lpExplicitHandleList), 0, 0);
@@ -176,9 +177,9 @@ static textwindows int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
   if (ok) {
     struct NtStartupInfoEx info = {
         .StartupInfo = *a->lpStartupInfo,
-        .StartupInfo.cb = sizeof(info),
         .lpAttributeList = alist,
     };
+    info.StartupInfo.cb = sizeof(info);
     if (ok) {
       if (CreateProcess(sb->path, sb->cmdline, 0, 0, true,
                         a->dwCreationFlags | kNtCreateUnicodeEnvironment |
@@ -237,6 +238,7 @@ textwindows int ntspawn(struct NtSpawnArgs *args) {
   BLOCK_SIGNALS;
   if ((sb = ntspawn_malloc(sizeof(*sb)))) {
     rc = ntspawn2(args, sb);
+    ntspawn_free(sb);
   } else {
     rc = -1;
   }

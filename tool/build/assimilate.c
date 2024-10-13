@@ -25,8 +25,8 @@
 #include "libc/errno.h"
 #include "libc/fmt/conv.h"
 #include "libc/limits.h"
-#include "libc/macho.internal.h"
-#include "libc/macros.internal.h"
+#include "libc/macho.h"
+#include "libc/macros.h"
 #include "libc/runtime/runtime.h"
 #include "libc/serialize.h"
 #include "libc/stdckdint.h"
@@ -66,8 +66,6 @@
 #define FORMAT_ELF    1
 #define FORMAT_MACHO  2
 #define FORMAT_PE     3
-
-#include "libc/mem/tinymalloc.inc"
 
 static int g_arch;
 static int g_format;

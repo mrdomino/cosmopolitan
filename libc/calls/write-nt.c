@@ -18,7 +18,6 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/internal.h"
 #include "libc/calls/sig.internal.h"
-#include "libc/calls/struct/fd.internal.h"
 #include "libc/calls/struct/iovec.h"
 #include "libc/calls/struct/sigset.h"
 #include "libc/calls/struct/sigset.internal.h"
@@ -26,7 +25,8 @@
 #include "libc/calls/syscall_support-nt.internal.h"
 #include "libc/errno.h"
 #include "libc/intrin/atomic.h"
-#include "libc/intrin/nomultics.internal.h"
+#include "libc/intrin/fds.h"
+#include "libc/intrin/nomultics.h"
 #include "libc/intrin/weaken.h"
 #include "libc/nt/console.h"
 #include "libc/nt/enum/consolemodeflags.h"
@@ -53,20 +53,17 @@ static textwindows ssize_t sys_write_nt_impl(int fd, void *data, size_t size,
   bool isconsole = f->kind == kFdConsole;
 
   // not implemented, XNU returns eperm();
-  if (f->kind == kFdDevRandom) {
+  if (f->kind == kFdDevRandom)
     return eperm();
-  }
 
   // determine win32 handle for writing
   int64_t handle = f->handle;
-  if (isconsole && _weaken(GetConsoleOutputHandle)) {
+  if (isconsole && _weaken(GetConsoleOutputHandle))
     handle = _weaken(GetConsoleOutputHandle)();
-  }
 
   // intercept ansi tty configuration sequences
-  if (isconsole && _weaken(GetConsoleOutputHandle)) {
+  if (isconsole && _weaken(GetConsoleOutputHandle))
     _weaken(InterceptTerminalCommands)(data, size);
-  }
 
   // perform heavy lifting
   ssize_t rc;

@@ -19,8 +19,9 @@
 #include "ape/ape.h"
 #include "libc/assert.h"
 #include "libc/calls/calls.h"
+#include "libc/ctype.h"
 #include "libc/dce.h"
-#include "libc/dos.internal.h"
+#include "libc/dos.h"
 #include "libc/elf/def.h"
 #include "libc/elf/elf.h"
 #include "libc/elf/scalar.h"
@@ -29,8 +30,8 @@
 #include "libc/fmt/conv.h"
 #include "libc/fmt/itoa.h"
 #include "libc/limits.h"
-#include "libc/macho.internal.h"
-#include "libc/macros.internal.h"
+#include "libc/macho.h"
+#include "libc/macros.h"
 #include "libc/mem/mem.h"
 #include "libc/nt/pedef.internal.h"
 #include "libc/nt/struct/imageimportbyname.internal.h"
@@ -40,7 +41,7 @@
 #include "libc/runtime/runtime.h"
 #include "libc/runtime/symbols.internal.h"
 #include "libc/serialize.h"
-#include "libc/stdalign.internal.h"
+#include "libc/stdalign.h"
 #include "libc/stdckdint.h"
 #include "libc/stdio/stdio.h"
 #include "libc/str/blake2.h"
@@ -48,7 +49,7 @@
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/prot.h"
-#include "libc/zip.internal.h"
+#include "libc/zip.h"
 #include "third_party/getopt/getopt.internal.h"
 #include "third_party/zlib/zlib.h"
 #include "tool/build/lib/lib.h"
@@ -258,8 +259,6 @@ static Elf64_Off noteoff;
 static Elf64_Xword notesize;
 
 static char *r_off32_e_lfanew;
-
-#include "libc/mem/tinymalloc.inc"
 
 static wontreturn void Die(const char *thing, const char *reason) {
   tinyprint(2, thing, ": ", reason, "\n", NULL);
@@ -678,6 +677,8 @@ static void LoadSymbols(Elf64_Ehdr *e, Elf64_Off size, const char *path) {
   struct SymbolTable *st = OpenSymbolTable(path);
   if (!st)
     Die(path, "could not load elf symbol table");
+  st->names = 0;      // make this deterministic
+  st->name_base = 0;  // ready for serialization
   size_t data_size;
   void *data = Deflate(st, st->size, &data_size);
   uint32_t crc = crc32_z(0, st, st->size);

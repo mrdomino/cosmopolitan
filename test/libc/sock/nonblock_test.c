@@ -20,7 +20,7 @@
 #include "libc/dce.h"
 #include "libc/errno.h"
 #include "libc/intrin/kprintf.h"
-#include "libc/intrin/strace.internal.h"
+#include "libc/intrin/strace.h"
 #include "libc/runtime/runtime.h"
 #include "libc/runtime/syslib.internal.h"
 #include "libc/sock/sock.h"
@@ -37,9 +37,6 @@
 #include "libc/thread/thread.h"
 
 TEST(O_NONBLOCK, canBeSetBySocket_toMakeListenNonBlocking) {
-  // TODO(jart): this doesn't make any sense on windows
-  if (IsWindows())
-    return;
   char buf[16] = {0};
   uint32_t addrsize = sizeof(struct sockaddr_in);
   struct sockaddr_in addr = {

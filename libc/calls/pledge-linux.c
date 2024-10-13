@@ -28,8 +28,8 @@
 #include "libc/calls/ucontext.h"
 #include "libc/intrin/bsr.h"
 #include "libc/intrin/likely.h"
-#include "libc/intrin/promises.internal.h"
-#include "libc/macros.internal.h"
+#include "libc/intrin/promises.h"
+#include "libc/macros.h"
 #include "libc/runtime/runtime.h"
 #include "libc/runtime/stack.h"
 #include "libc/sysv/consts/audit.h"
@@ -712,6 +712,7 @@ static const uint16_t kPledgeRpath[] = {
 #endif                             //
     __NR_linux_fstat,              //
     __NR_linux_fstatat,            //
+    __NR_linux_statx,              //
 #ifdef __NR_linux_access           //
     __NR_linux_access,             //
 #endif                             //
@@ -739,6 +740,7 @@ static const uint16_t kPledgeWpath[] = {
     __NR_linux_lstat,               //
 #endif                              //
     __NR_linux_fstatat,             //
+    __NR_linux_statx,               //
 #ifdef __NR_linux_access            //
     __NR_linux_access,              //
 #endif                              //
@@ -1005,16 +1007,15 @@ static const struct sock_filter kPledgeStart[] = {
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(nr)),
 #ifdef __NR_linux_memfd_secret
     // forbid some system calls with ENOSYS (rather than EPERM)
-    BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, __NR_linux_memfd_secret, 5, 0),
+    BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, __NR_linux_memfd_secret, 4, 0),
 #else
     BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, __NR_linux_landlock_restrict_self + 1,
-             5, 0),
+             4, 0),
 #endif
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_rseq, 4, 0),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_memfd_create, 3, 0),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_openat2, 2, 0),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_clone3, 1, 0),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_statx, 0, 1),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_rseq, 3, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_memfd_create, 2, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_openat2, 1, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_clone3, 0, 1),
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (Enosys & SECCOMP_RET_DATA)),
 };
 
@@ -1641,7 +1642,6 @@ static privileged void AllowMmapExec(struct Filter *f) {
 //
 //   - MAP_LOCKED   (0x02000)
 //   - MAP_NONBLOCK (0x10000)
-//   - MAP_HUGETLB  (0x40000)
 //
 static privileged void AllowMmapNoexec(struct Filter *f) {
   static const struct sock_filter fragment[] = {
@@ -1650,7 +1650,7 @@ static privileged void AllowMmapNoexec(struct Filter *f) {
       /*L2*/ BPF_STMT(BPF_ALU | BPF_AND | BPF_K, ~(PROT_READ | PROT_WRITE)),
       /*L3*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0, 0, 8 - 4),
       /*L4*/ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(args[3])),  // flags
-      /*L5*/ BPF_STMT(BPF_ALU | BPF_AND | BPF_K, 0x52000),
+      /*L5*/ BPF_STMT(BPF_ALU | BPF_AND | BPF_K, 0x12000),
       /*L6*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0, 0, 1),
       /*L7*/ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
       /*L8*/ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(nr)),

@@ -23,7 +23,7 @@
 #include "libc/calls/struct/sigset.h"
 #include "libc/errno.h"
 #include "libc/log/check.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/math.h"
 #include "libc/mem/gc.h"
 #include "libc/mem/mem.h"
@@ -34,7 +34,7 @@
 #include "libc/stdio/rand.h"
 #include "libc/stdio/stdio.h"
 #include "libc/str/str.h"
-#include "libc/str/tab.internal.h"
+#include "libc/str/tab.h"
 #include "libc/sysv/consts/grnd.h"
 #include "libc/sysv/consts/sig.h"
 #include "libc/testlib/ezbench.h"
@@ -59,11 +59,9 @@ void *TortureWorker(void *arg) {
   ASSERT_SYS(0, 0, sigprocmask(SIG_SETMASK, &ss, 0));
   ready = true;
   while (!done) {
-    if (!IsWindows())
-      pthread_kill(parent, SIGUSR1);
+    pthread_kill(parent, SIGUSR1);
     usleep(1);
-    if (!IsWindows())
-      pthread_kill(parent, SIGUSR2);
+    pthread_kill(parent, SIGUSR2);
     usleep(1);
   }
   return 0;

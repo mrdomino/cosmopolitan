@@ -18,7 +18,8 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/struct/sigset.internal.h"
 #include "libc/calls/syscall_support-nt.internal.h"
-#include "libc/intrin/strace.internal.h"
+#include "libc/ctype.h"
+#include "libc/intrin/strace.h"
 #include "libc/mem/alloca.h"
 #include "libc/nt/createfile.h"
 #include "libc/nt/enum/accessmask.h"
@@ -51,6 +52,7 @@ static textwindows ssize_t sys_readlinkat_nt_impl(int dirfd, const char *path,
   ssize_t rc;
 #pragma GCC push_options
 #pragma GCC diagnostic ignored "-Walloca-larger-than="
+#pragma GCC diagnostic ignored "-Wanalyzer-out-of-bounds"
   uint32_t mem = 6000;
   volatile char *memory = alloca(mem);
   CheckLargeStackAllocation((char *)memory, mem);
@@ -118,7 +120,17 @@ static textwindows ssize_t sys_readlinkat_nt_impl(int dirfd, const char *path,
         }
         rc = j;
       } else {
-        NTTRACE("sys_readlinkat_nt() should have kNtIoReparseTagSymlink");
+        // e.g. 0xA000001D means IO_REPARSE_TAG_LX_SYMLINK
+        //
+        //     "WSL symlinks can't be opened from Windows, only from
+        //      within WSL, so if we identify them as fs.ModeSymlink,
+        //      then functions like filepath.Walk would fail when trying
+        //      to follow the link."
+        //
+        //            —Quoth Quim Muntal (dev on Go team at Microsoft)
+        //
+        // See also MSDN Learn § 2.1.2.1 Reparse Tags
+        NTTRACE("reparse tag %#x != kNtIoReparseTagSymlink", rdb->ReparseTag);
         rc = einval();
       }
     } else {

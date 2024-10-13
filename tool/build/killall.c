@@ -18,7 +18,7 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/dce.h"
 #include "libc/limits.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/mem/mem.h"
 #include "libc/nt/enum/formatmessageflags.h"
 #include "libc/nt/enum/lang.h"
@@ -30,6 +30,7 @@
 #include "libc/stdio/stdio.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/sig.h"
+#include "libc/wctype.h"
 #include "libc/x/x.h"
 #include "third_party/getopt/getopt.internal.h"
 
@@ -49,8 +50,6 @@
 static const char *prog;
 static char16_t **filters;
 static uint32_t pids[10000];
-
-#include "libc/mem/tinymalloc.inc"
 
 static wontreturn void PrintUsage(int rc, FILE *f) {
   fprintf(f,

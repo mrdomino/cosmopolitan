@@ -32,12 +32,13 @@
 #include "libc/fmt/itoa.h"
 #include "libc/fmt/libgen.h"
 #include "libc/fmt/magnumstrs.internal.h"
-#include "libc/intrin/safemacros.internal.h"
+#include "libc/intrin/safemacros.h"
+#include "libc/intrin/x86.h"
 #include "libc/limits.h"
 #include "libc/log/appendresourcereport.internal.h"
 #include "libc/log/color.internal.h"
 #include "libc/log/log.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/math.h"
 #include "libc/mem/alg.h"
 #include "libc/mem/gc.h"
@@ -110,9 +111,9 @@ FLAGS\n\
   -T TARGET    specifies target name for V=0 logging\n\
   -A ACTION    specifies short command name for V=0 logging\n\
   -V NUMBER    specifies compiler version\n\
-  -C SECS      set cpu limit [default 16]\n\
+  -C SECS      set cpu limit [default 32]\n\
   -L SECS      set lat limit [default 90]\n\
-  -P PROCS     set pro limit [default 4096]\n\
+  -P PROCS     set pro limit [default 8192]\n\
   -S BYTES     set stk limit [default 8m]\n\
   -M BYTES     set mem limit [default 2048m]\n\
   -F BYTES     set fsz limit [default 256m]\n\
@@ -212,21 +213,21 @@ char *g_tmpout;
 const char *g_tmpout_original;
 
 const char *const kSafeEnv[] = {
-    "ADDR2LINE",   // needed by GetAddr2linePath
-    "HOME",        // needed by ~/.runit.psk
-    "HOMEDRIVE",   // needed by ~/.runit.psk
-    "HOMEPATH",    // needed by ~/.runit.psk
-    "MAKEFLAGS",   // needed by IsRunningUnderMake
-    "MODE",        // needed by test scripts
-    "PATH",        // needed by clang
-    "PWD",         // just seems plain needed
-    "STRACE",      // useful for troubleshooting
-    "TERM",        // needed to detect colors
-    "TMPDIR",      // needed by compiler
-    "SYSTEMROOT",  // needed by socket()
+    "ADDR2LINE",    // needed by GetAddr2linePath
+    "BUILDLOG",     // used by cosmocc
+    "HOME",         // needed by ~/.runit.psk
+    "HOMEDRIVE",    // needed by ~/.runit.psk
+    "HOMEPATH",     // needed by ~/.runit.psk
+    "KPRINTF_LOG",  // used by internals
+    "MAKEFLAGS",    // needed by IsRunningUnderMake
+    "MODE",         // needed by test scripts
+    "PATH",         // needed by clang
+    "PWD",          // just seems plain needed
+    "STRACE",       // useful for troubleshooting
+    "SYSTEMROOT",   // needed by socket()
+    "TERM",         // needed to detect colors
+    "TMPDIR",       // needed by compiler
 };
-
-#include "libc/mem/tinymalloc.inc"
 
 void OnAlrm(int sig) {
   ++gotalrm;
@@ -513,7 +514,11 @@ void AddArg(char *actual) {
 }
 
 static int GetBaseCpuFreqMhz(void) {
+#ifdef __x86_64__
   return KCPUIDS(16H, EAX) & 0x7fff;
+#else
+  return 0;
+#endif
 }
 
 void PlanResource(int resource, struct rlimit rlim) {
@@ -522,7 +527,7 @@ void PlanResource(int resource, struct rlimit rlim) {
     return;
   rlim.rlim_cur = MIN(rlim.rlim_cur, prior.rlim_max);
   rlim.rlim_max = MIN(rlim.rlim_max, prior.rlim_max);
-  posix_spawnattr_setrlimit(&spawnattr, resource, &rlim);
+  posix_spawnattr_setrlimit_np(&spawnattr, resource, &rlim);
 }
 
 void SetCpuLimit(int secs) {
@@ -644,7 +649,7 @@ int Launch(void) {
   posix_spawnattr_init(&spawnattr);
   posix_spawnattr_setsigmask(&spawnattr, &savemask);
   posix_spawnattr_setflags(&spawnattr,
-                           POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETRLIMIT);
+                           POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETRLIMIT_NP);
   SetCpuLimit(cpuquota);
   SetFszLimit(fszquota);
   SetMemLimit(memquota);
@@ -793,7 +798,11 @@ bool MovePreservingDestinationInode(const char *from, const char *to) {
     rc = copy_file_range(fdin, 0, fdout, 0, remain, 0);
     if (rc != -1) {
       remain -= rc;
-    } else if (errno == EXDEV || errno == ENOSYS) {
+    } else if (errno == EXDEV ||    // different partitions
+               errno == EINVAL ||   // possible w/ ecryptfs
+               errno == ENOSYS ||   // not linux or freebsd
+               errno == ENOTSUP ||  // no fs support for it
+               errno == EOPNOTSUPP) {
       if (lseek(fdin, 0, SEEK_SET) == -1) {
         res = false;
         break;
@@ -855,7 +864,7 @@ int main(int argc, char *argv[]) {
   verbose = 4;
   timeout = 90;                    // secs
   cpuquota = 32;                   // secs
-  proquota = 4096;                 // procs
+  proquota = 8192;                 // procs
   stkquota = 8 * 1024 * 1024;      // bytes
   fszquota = 256 * 1000 * 1000;    // bytes
   memquota = 2048L * 1024 * 1024;  // bytes
@@ -1054,134 +1063,11 @@ int main(int argc, char *argv[]) {
 
 #ifdef __x86_64__
     } else if (!strcmp(argv[i], "-march=native")) {
-      const struct X86ProcessorModel *model;
-      if (X86_HAVE(XOP))
-        AddArg("-mxop");
-      if (X86_HAVE(SSE4A))
-        AddArg("-msse4a");
-      if (X86_HAVE(SSE3))
-        AddArg("-msse3");
-      if (X86_HAVE(SSSE3))
-        AddArg("-mssse3");
-      if (X86_HAVE(SSE4_1))
-        AddArg("-msse4.1");
-      if (X86_HAVE(SSE4_2))
-        AddArg("-msse4.2");
-      if (X86_HAVE(AVX))
-        AddArg("-mavx");
-      if (X86_HAVE(AVX2)) {
-        AddArg("-mavx2");
-        if (isgcc) {
-          AddArg("-msse2avx");
-          AddArg("-Wa,-msse2avx");
-        }
-      }
-      if (X86_HAVE(AVX512F))
-        AddArg("-mavx512f");
-      if (X86_HAVE(AVX512PF))
-        AddArg("-mavx512pf");
-      if (X86_HAVE(AVX512ER))
-        AddArg("-mavx512er");
-      if (X86_HAVE(AVX512CD))
-        AddArg("-mavx512cd");
-      if (X86_HAVE(AVX512VL))
-        AddArg("-mavx512vl");
-      if (X86_HAVE(AVX512BW))
-        AddArg("-mavx512bw");
-      if (X86_HAVE(AVX512DQ))
-        AddArg("-mavx512dq");
-      if (X86_HAVE(AVX512IFMA))
-        AddArg("-mavx512ifma");
-      if (X86_HAVE(AVX512VBMI))
-        AddArg("-mavx512vbmi");
-      if (X86_HAVE(SHA))
-        AddArg("-msha");
-      if (X86_HAVE(AES))
-        AddArg("-maes");
-      if (X86_HAVE(VAES))
-        AddArg("-mvaes");
-      if (X86_HAVE(PCLMUL))
-        AddArg("-mpclmul");
-      if (X86_HAVE(FSGSBASE))
-        AddArg("-mfsgsbase");
-      if (X86_HAVE(F16C))
-        AddArg("-mf16c");
-      if (X86_HAVE(FMA))
-        AddArg("-mfma");
-      if (X86_HAVE(POPCNT))
-        AddArg("-mpopcnt");
-      if (X86_HAVE(BMI))
-        AddArg("-mbmi");
-      if (X86_HAVE(BMI2))
-        AddArg("-mbmi2");
-      if (X86_HAVE(ADX))
-        AddArg("-madx");
-      if (X86_HAVE(FXSR))
-        AddArg("-mfxsr");
-      if ((model = getx86processormodel(kX86ProcessorModelKey))) {
-        switch (model->march) {
-          case X86_MARCH_CORE2:
-            AddArg("-march=core2");
-            break;
-          case X86_MARCH_NEHALEM:
-            AddArg("-march=nehalem");
-            break;
-          case X86_MARCH_WESTMERE:
-            AddArg("-march=westmere");
-            break;
-          case X86_MARCH_SANDYBRIDGE:
-            AddArg("-march=sandybridge");
-            break;
-          case X86_MARCH_IVYBRIDGE:
-            AddArg("-march=ivybridge");
-            break;
-          case X86_MARCH_HASWELL:
-            AddArg("-march=haswell");
-            break;
-          case X86_MARCH_BROADWELL:
-            AddArg("-march=broadwell");
-            break;
-          case X86_MARCH_SKYLAKE:
-          case X86_MARCH_KABYLAKE:
-            AddArg("-march=skylake");
-            break;
-          case X86_MARCH_CANNONLAKE:
-            AddArg("-march=cannonlake");
-            break;
-          case X86_MARCH_ICELAKE:
-            if (model->grade >= X86_GRADE_SERVER) {
-              AddArg("-march=icelake-server");
-            } else {
-              AddArg("-march=icelake-client");
-            }
-            break;
-          case X86_MARCH_TIGERLAKE:
-            AddArg("-march=tigerlake");
-            break;
-          case X86_MARCH_BONNELL:
-          case X86_MARCH_SALTWELL:
-            AddArg("-march=bonnell");
-            break;
-          case X86_MARCH_SILVERMONT:
-          case X86_MARCH_AIRMONT:
-            AddArg("-march=silvermont");
-            break;
-          case X86_MARCH_GOLDMONT:
-            AddArg("-march=goldmont");
-            break;
-          case X86_MARCH_GOLDMONTPLUS:
-            AddArg("-march=goldmont-plus");
-            break;
-          case X86_MARCH_TREMONT:
-            AddArg("-march=tremont");
-            break;
-          case X86_MARCH_KNIGHTSLANDING:
-            AddArg("-march=knl");
-            break;
-          case X86_MARCH_KNIGHTSMILL:
-            AddArg("-march=knm");
-            break;
-        }
+      const char *march;
+      if ((march = __cpu_march(__cpu_model.__cpu_subtype))) {
+        char *buf = malloc(7 + strlen(march) + 1);
+        stpcpy(stpcpy(buf, "-march="), march);
+        AddArg(buf);
       }
 #endif /* __x86_64__ */
 

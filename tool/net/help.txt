@@ -1,6 +1,6 @@
 SYNOPSIS
 
-  redbean [-?BVabdfghjkmsuvz] [-p PORT] [-D DIR] [-- SCRIPTARGS...]
+  redbean.com [-?BVabdfghjkmsuvz] [-p PORT] [-D DIR] [-- SCRIPTARGS...]
 
 DESCRIPTION
 
@@ -137,15 +137,15 @@ USAGE
   This executable is also a ZIP file that contains static assets.
   You can run redbean interactively in your terminal as follows:
 
-    ./redbean -vvvmbag        # starts server verbosely
+    ./redbean.com -vvvmbag        # starts server verbosely
     open http://127.0.0.1:8080/   # shows zip listing page
     CTRL-C                        # 1x: graceful shutdown
     CTRL-C                        # 2x: forceful shutdown
 
   You can override the default listing page by adding:
 
-    zip redbean index.lua     # lua server pages take priority
-    zip redbean index.html    # default page for directory
+    zip redbean.com index.lua     # lua server pages take priority
+    zip redbean.com index.html    # default page for directory
 
   The listing page only applies to the root directory. However the
   default index page applies to subdirectories too. In order for it
@@ -160,7 +160,7 @@ USAGE
       --no-parent            \
       --no-if-modified-since \
       http://a.example/index.html
-    zip -r redbean a.example/  # default page for directory
+    zip -r redbean.com a.example/  # default page for directory
 
   redbean normalizes the trailing slash for you automatically:
 
@@ -198,18 +198,18 @@ USAGE
   by default, embedded as a bas64 data uri. You can override the
   custom page for various errors by adding files to the zip root.
 
-    zip redbean 404.html      # custom not found page
+    zip redbean.com 404.html      # custom not found page
 
   Audio video content should not be compressed in your ZIP files.
   Uncompressed assets enable browsers to send Range HTTP request.
   On the other hand compressed assets are best for gzip encoding.
 
-    zip redbean index.html    # adds file
-    zip -0 redbean video.mp4  # adds without compression
+    zip redbean.com index.html    # adds file
+    zip -0 redbean.com video.mp4  # adds without compression
 
   You can have redbean run as a daemon by doing the following:
 
-    sudo ./redbean -vvdp80 -p443 -L redbean.log -P redbean.pid
+    sudo ./redbean.com -vvdp80 -p443 -L redbean.log -P redbean.pid
     kill -TERM $(cat redbean.pid) # 1x: graceful shutdown
     kill -TERM $(cat redbean.pid) # 2x: forceful shutdown
 
@@ -230,14 +230,7 @@ USAGE
   run on six different operating systems. To do that, it needs to
   extract a 4kb loader program to ${TMPDIR:-${HOME:-.}}/.ape that'll
   map your redbean into memory. It does however check to see if `ape`
-  is on the system path beforehand. You can also "assimilate" any
-  redbean into the platform-local executable format by running:
-
-      $ file redbean
-      redbean: DOS/MBR boot sector
-      $ ./redbean --assimilate
-      $ file redbean
-      redbean: ELF 64-bit LSB executable
+  is on the system path beforehand.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECURITY
@@ -406,12 +399,14 @@ REPL
   encoded in its preferred executable format. You can assimilate your
   redbean into the local format using the following commands:
 
-      $ file redbean
-      redbean: DOS/MBR boot sector
-      $ ./redbean --assimilate
-      $ file redbean
-      redbean: ELF 64-bit LSB executable
-      $ sudo cp redbean /usr/bin/redbean
+      $ file redbean.com
+      redbean.com: DOS/MBR boot sector
+      $ curl -o assimilate https://cosmo.zip/pub/cosmos/bin/assimilate
+      $ chmod +x assimilate
+      $ ./assimilate ./redbean.com
+      $ file redbean.com
+      redbean.com: ELF 64-bit LSB executable
+      $ sudo cp redbean.com /usr/bin/redbean
 
   By following the above steps, redbean can be installed systemwide for
   multiple user accounts. It's also possible to chmod the binary to have
@@ -461,7 +456,7 @@ GLOBALS
 
           Then your `/.init.lua` file will have the `arg` array like:
 
-              arg[-1] = '/usr/bin/redbean'
+              arg[-1] = '/usr/bin/redbean
               arg[ 0] = '/zip/.init.lua'
               arg[ 1] = 'arg1'
               arg[ 2] = 'arg2'
@@ -469,11 +464,11 @@ GLOBALS
           If you launch redbean in interpreter mode (rather than web
           server) mode, then an invocation like this:
 
-              ./redbean -i script.lua arg1 arg2
+              ./redbean.com -i script.lua arg1 arg2
 
           Would have an `arg` array like this:
 
-              arg[-1] = './redbean'
+              arg[-1] = './redbean.com'
               arg[ 0] = 'script.lua'
               arg[ 1] = 'arg1'
               arg[ 2] = 'arg2'
@@ -586,10 +581,10 @@ HOOKS
           `true`, redbean will close the connection without calling fork.
 
   OnLogLatency(reqtimeus:int, contimeus:int)
-          If this function is defined it'll be called from the main process
-          each time redbean completes handling of a request, but before the
-          response is sent. The handler received the time (in µs) since the
-          request handling and connection handling started.
+          If this function is defined it'll be called from the child worker
+          process each time redbean completes the handling of a request, but
+          before the response is sent. The handler receives the time (in µs)
+          since the request handling and connection handling started.
 
   OnProcessCreate(pid:int, ip:int, port:int, serverip:int, serverport:int)
           If this function is defined it'll be called from the main process
@@ -1063,7 +1058,10 @@ FUNCTIONS
           This function is not available in unsecure mode.
 
   UuidV4() -> str
-          Returns an uuid v4 string.
+          Returns a uuid v4 string.
+
+  UuidV7() -> str
+          Returns a uuid v7 string.
 
   Fetch(url:str[,body:str|{method=value:str,body=value:str,headers=table,...}])
       ├─→ status:int, {header:str=value:str,...}, body:str
@@ -3675,23 +3673,73 @@ UNIX MODULE
 
     `clock` can be any one of of:
 
-    - `CLOCK_REALTIME`: universally supported
-    - `CLOCK_REALTIME_FAST`: ditto but faster on freebsd
-    - `CLOCK_REALTIME_PRECISE`: ditto but better on freebsd
-    - `CLOCK_REALTIME_COARSE`: : like `CLOCK_REALTIME_FAST` but needs Linux 2.6.32+
-    - `CLOCK_MONOTONIC`: universally supported
-    - `CLOCK_MONOTONIC_FAST`: ditto but faster on freebsd
-    - `CLOCK_MONOTONIC_PRECISE`: ditto but better on freebsd
-    - `CLOCK_MONOTONIC_COARSE`: : like `CLOCK_MONOTONIC_FAST` but needs Linux 2.6.32+
-    - `CLOCK_MONOTONIC_RAW`: is actually monotonic but needs Linux 2.6.28+
-    - `CLOCK_PROCESS_CPUTIME_ID`: linux and bsd
-    - `CLOCK_THREAD_CPUTIME_ID`: linux and bsd
-    - `CLOCK_MONOTONIC_COARSE`: linux, freebsd
-    - `CLOCK_PROF`: linux and netbsd
-    - `CLOCK_BOOTTIME`: linux and openbsd
-    - `CLOCK_REALTIME_ALARM`: linux-only
-    - `CLOCK_BOOTTIME_ALARM`: linux-only
-    - `CLOCK_TAI`: linux-only
+    - `CLOCK_REALTIME` returns a wall clock timestamp represented in
+      nanoseconds since the UNIX epoch (~1970). It'll count time in the
+      suspend state. This clock is subject to being smeared by various
+      adjustments made by NTP. These timestamps can have unpredictable
+      discontinuous jumps when clock_settime() is used. Therefore this
+      clock is the default clock for everything, even pthread condition
+      variables. Cosmopoiltan guarantees this clock will never raise
+      `EINVAL` and also guarantees `CLOCK_REALTIME == 0` will always be
+      the case. On Windows this maps to GetSystemTimePreciseAsFileTime().
+      On platforms with vDSOs like Linux, Windows, and MacOS ARM64 this
+      should take about 20 nanoseconds.
+
+    - `CLOCK_MONOTONIC` returns a timestamp with an unspecified epoch,
+      that should be when the system was powered on. These timestamps
+      shouldn't go backwards. Timestamps shouldn't count time spent in
+      the sleep, suspend, and hibernation states. These timestamps won't
+      be impacted by clock_settime(). These timestamps may be impacted by
+      frequency adjustments made by NTP. Cosmopoiltan guarantees this
+      clock will never raise `EINVAL`. MacOS and BSDs use the word
+      "uptime" to describe this clock. On Windows this maps to
+      QueryUnbiasedInterruptTimePrecise().
+
+    - `CLOCK_BOOTTIME` is a monotonic clock returning a timestamp with an
+      unspecified epoch, that should be relative to when the host system
+      was powered on. These timestamps shouldn't go backwards. Timestamps
+      should also include time spent in a sleep, suspend, or hibernation
+      state. These timestamps aren't impacted by clock_settime(), but
+      they may be impacted by frequency adjustments made by NTP. This
+      clock will raise an `EINVAL` error on extremely old Linux distros
+      like RHEL5. MacOS and BSDs use the word "monotonic" to describe
+      this clock. On Windows this maps to QueryInterruptTimePrecise().
+
+    - `CLOCK_MONOTONIC_RAW` returns a timestamp from an unspecified
+      epoch. These timestamps don't count time spent in the sleep,
+      suspend, and hibernation states. Unlike `CLOCK_MONOTONIC` this
+      clock is guaranteed to not be impacted by frequency adjustments or
+      discontinuous jumps caused by clock_settime(). Providing this level
+      of assurances may make this clock slower than the normal monotonic
+      clock. Furthermore this clock may cause `EINVAL` to be raised if
+      running on a host system that doesn't provide those guarantees,
+      e.g. OpenBSD and MacOS on AMD64.
+
+    - `CLOCK_REALTIME_COARSE` is the same as `CLOCK_REALTIME` except
+      it'll go faster if the host OS provides a cheaper way to read the
+      wall time. Please be warned that coarse can be really coarse.
+      Rather than nano precision, you're looking at `CLK_TCK` precision,
+      which can lag as far as 30 milliseconds behind or possibly more.
+      Cosmopolitan may fallback to `CLOCK_REALTIME` if a faster less
+      accurate clock isn't provided by the system. This clock will raise
+      an `EINVAL` error on extremely old Linux distros like RHEL5.
+
+    - `CLOCK_MONOTONIC_COARSE` is the same as `CLOCK_MONOTONIC` except
+      it'll go faster if the host OS provides a cheaper way to read the
+      unbiased time. Please be warned that coarse can be really coarse.
+      Rather than nano precision, you're looking at `CLK_TCK` precision,
+      which can lag as far as 30 milliseconds behind or possibly more.
+      Cosmopolitan may fallback to `CLOCK_REALTIME` if a faster less
+      accurate clock isn't provided by the system. This clock will raise
+      an `EINVAL` error on extremely old Linux distros like RHEL5.
+
+    - `CLOCK_PROCESS_CPUTIME_ID` returns the amount of time this process
+      was actively scheduled. This is similar to getrusage() and clock().
+      Cosmopoiltan guarantees this clock will never raise `EINVAL`.
+
+    - `CLOCK_THREAD_CPUTIME_ID` returns the amount of time this thread
+      was actively scheduled. This is similar to getrusage() and clock().
+      Cosmopoiltan guarantees this clock will never raise `EINVAL`.
 
     Returns `EINVAL` if clock isn't supported on platform.
 
@@ -4474,9 +4522,8 @@ UNIX MODULE
 
       If the executable in question needs a loader, then you will need
       "rpath prot_exec" too. With APE, security is strongest when you
-      assimilate your binaries beforehand, using the --assimilate flag,
-      or the o//tool/build/assimilate program. On OpenBSD this is
-      mandatory.
+      assimilate your binaries beforehand using the assimilate program.
+      On OpenBSD this is mandatory.
 
     prot_exec
 

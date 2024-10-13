@@ -31,12 +31,12 @@
 #include "libc/fmt/magnumstrs.internal.h"
 #include "libc/limits.h"
 #include "libc/log/log.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/mem/gc.h"
 #include "libc/mem/mem.h"
 #include "libc/runtime/runtime.h"
 #include "libc/serialize.h"
-#include "libc/stdalign.internal.h"
+#include "libc/stdalign.h"
 #include "libc/stdckdint.h"
 #include "libc/stdio/stdio.h"
 #include "libc/str/str.h"
@@ -44,7 +44,7 @@
 #include "libc/sysv/consts/msync.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/prot.h"
-#include "libc/zip.internal.h"
+#include "libc/zip.h"
 #include "third_party/getopt/getopt.internal.h"
 
 /**
@@ -66,8 +66,6 @@ static Elf64_Sym *syms;
 static Elf64_Ehdr *elf;
 static const char *epath;
 static Elf64_Xword symcount;
-
-#include "libc/mem/tinymalloc.inc"
 
 static wontreturn void Die(const char *reason) {
   tinyprint(2, epath, ": ", reason, "\n", NULL);
@@ -245,7 +243,7 @@ static void CheckPrivilegedCrossReferences(void) {
       if (~shdr->sh_flags & SHF_EXECINSTR)
         continue;  // data reference
       if ((secname = GetElfString(elf, esize, secstrs, shdr->sh_name)) &&
-          strcmp(".privileged", secname)) {
+          !startswith(secname, ".privileged")) {
         tinyprint(2, epath,
                   ": code in .privileged section "
                   "references symbol '",

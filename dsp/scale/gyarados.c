@@ -25,7 +25,7 @@
 #include "libc/limits.h"
 #include "libc/log/check.h"
 #include "libc/log/log.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/math.h"
 #include "libc/mem/gc.h"
 #include "libc/mem/mem.h"
@@ -149,12 +149,11 @@ static int Sharpen(int ax, int bx, int cx) {
 
 static void GyaradosImpl(long dyw, long dxw, int dst[dyw][dxw], long syw,
                          long sxw, const int src[syw][sxw], long dyn, long dxn,
-                         long syn, long sxn, int tmp0[restrict dyn][sxn],
-                         int tmp1[restrict dyn][sxn],
-                         int tmp2[restrict dyn][dxn], long yfn, long xfn,
-                         const short fyi[dyn][yfn], const short fyw[dyn][yfn],
-                         const short fxi[dxn][xfn], const short fxw[dxn][xfn],
-                         bool sharpen) {
+                         long syn, long sxn, int tmp0[dyn][sxn],
+                         int tmp1[dyn][sxn], int tmp2[dyn][dxn], long yfn,
+                         long xfn, const short fyi[dyn][yfn],
+                         const short fyw[dyn][yfn], const short fxi[dxn][xfn],
+                         const short fxw[dxn][xfn], bool sharpen) {
   long i;
   int eax, dy, dx, sx;
   for (sx = 0; sx < sxn; ++sx) {
@@ -165,12 +164,19 @@ static void GyaradosImpl(long dyw, long dxw, int dst[dyw][dxw], long syw,
       tmp0[dy][sx] = QRS(M, eax);
     }
   }
-  for (dy = 0; dy < dyn; ++dy) {
-    for (sx = 0; sx < sxn; ++sx) {
-      tmp1[dy][sx] = sharpen ? Sharpen(tmp0[MIN(dyn - 1, MAX(0, dy - 1))][sx],
-                                       tmp0[dy][sx],
-                                       tmp0[MIN(dyn - 1, MAX(0, dy + 1))][sx])
-                             : tmp0[dy][sx];
+  if (sharpen) {
+    for (dy = 0; dy < dyn; ++dy) {
+      for (sx = 0; sx < sxn; ++sx) {
+        tmp1[dy][sx] =
+            Sharpen(tmp0[MIN(dyn - 1, MAX(0, dy - 1))][sx], tmp0[dy][sx],
+                    tmp0[MIN(dyn - 1, MAX(0, dy + 1))][sx]);
+      }
+    }
+  } else {
+    for (dy = 0; dy < dyn; ++dy) {
+      for (sx = 0; sx < sxn; ++sx) {
+        tmp1[dy][sx] = tmp0[dy][sx];
+      }
     }
   }
   for (dx = 0; dx < dxn; ++dx) {
@@ -181,12 +187,19 @@ static void GyaradosImpl(long dyw, long dxw, int dst[dyw][dxw], long syw,
       tmp2[dy][dx] = QRS(M, eax);
     }
   }
-  for (dx = 0; dx < dxn; ++dx) {
-    for (dy = 0; dy < dyn; ++dy) {
-      dst[dy][dx] = sharpen ? Sharpen(tmp2[dy][MIN(dxn - 1, MAX(0, dx - 1))],
-                                      tmp2[dy][dx],
-                                      tmp2[dy][MIN(dxn - 1, MAX(0, dx + 1))])
-                            : tmp2[dy][dx];
+  if (sharpen) {
+    for (dx = 0; dx < dxn; ++dx) {
+      for (dy = 0; dy < dyn; ++dy) {
+        dst[dy][dx] =
+            Sharpen(tmp2[dy][MIN(dxn - 1, MAX(0, dx - 1))], tmp2[dy][dx],
+                    tmp2[dy][MIN(dxn - 1, MAX(0, dx + 1))]);
+      }
+    }
+  } else {
+    for (dx = 0; dx < dxn; ++dx) {
+      for (dy = 0; dy < dyn; ++dy) {
+        dst[dy][dx] = tmp2[dy][dx];
+      }
     }
   }
 }

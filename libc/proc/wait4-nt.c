@@ -21,7 +21,7 @@
 #include "libc/calls/struct/sigset.h"
 #include "libc/calls/struct/sigset.internal.h"
 #include "libc/intrin/dll.h"
-#include "libc/intrin/strace.internal.h"
+#include "libc/intrin/strace.h"
 #include "libc/intrin/weaken.h"
 #include "libc/nt/enum/wait.h"
 #include "libc/nt/events.h"
@@ -74,33 +74,32 @@ static textwindows int __proc_wait(int pid, int *wstatus, int options,
 
     // check for signals and cancelation
     int sig, handler_was_called;
-    if (_check_cancel() == -1) {
+    if (_check_cancel() == -1)
       return -1;
-    }
     if (_weaken(__sig_get) && (sig = _weaken(__sig_get)(waitmask))) {
       handler_was_called = _weaken(__sig_relay)(sig, SI_KERNEL, waitmask);
-      if (_check_cancel() == -1) {
+      if (_check_cancel() == -1)
         return -1;  // ECANCELED because SIGTHR was just handled
-      }
-      if (handler_was_called & SIG_HANDLED_NO_RESTART) {
+      if (handler_was_called & SIG_HANDLED_NO_RESTART)
         return eintr();  // a non-SA_RESTART handler was called
-      }
     }
 
     // check for zombie to harvest
     __proc_lock();
   CheckForZombies:
     int rc = __proc_check(pid, wstatus, rusage);
+
+    // if there's no zombies left
+    // check if there's any living processes
+    if (!rc && dll_is_empty(__proc.list)) {
+      __proc_unlock();
+      return echild();
+    }
+
+    // otherwise return zombie or zero
     if (rc || (options & WNOHANG)) {
       __proc_unlock();
       return rc;
-    }
-
-    // there's no zombies left
-    // check if there's any living processes
-    if (dll_is_empty(__proc.list)) {
-      __proc_unlock();
-      return echild();
     }
 
     // get appropriate wait object
@@ -134,15 +133,15 @@ static textwindows int __proc_wait(int pid, int *wstatus, int options,
 
     // perform blocking operation
     uint32_t wi;
-    uintptr_t sem;
+    uintptr_t event;
     struct PosixThread *pt = _pthread_self();
     pt->pt_blkmask = waitmask;
-    pt->pt_semaphore = sem = CreateSemaphore(0, 0, 1, 0);
-    atomic_store_explicit(&pt->pt_blocker, PT_BLOCKER_SEM,
+    pt->pt_event = event = CreateEvent(0, 0, 0, 0);
+    atomic_store_explicit(&pt->pt_blocker, PT_BLOCKER_EVENT,
                           memory_order_release);
-    wi = WaitForMultipleObjects(2, (intptr_t[2]){hWaitObject, sem}, 0, -1u);
+    wi = WaitForMultipleObjects(2, (intptr_t[2]){hWaitObject, event}, 0, -1u);
     atomic_store_explicit(&pt->pt_blocker, 0, memory_order_release);
-    CloseHandle(sem);
+    CloseHandle(event);
 
     // log warning if handle unexpectedly closed
     if (wi & kNtWaitAbandoned) {
@@ -168,7 +167,7 @@ static textwindows int __proc_wait(int pid, int *wstatus, int options,
       }
       __proc_unlock();
       if (wi == 1) {
-        // __sig_cancel() woke our semaphore
+        // __sig_wake() woke our semaphore
         continue;
       } else {
         // neither posix or win32 define i/o error conditions for

@@ -39,6 +39,8 @@ EXAMPLES_BINS =							\
 	$(EXAMPLES_COMS:%=%.dbg)
 
 EXAMPLES_DIRECTDEPS =						\
+	CTL							\
+	DSP_AUDIO						\
 	DSP_CORE						\
 	DSP_SCALE						\
 	DSP_TTY							\
@@ -52,6 +54,7 @@ EXAMPLES_DIRECTDEPS =						\
 	LIBC_NEXGEN32E						\
 	LIBC_NT_ADVAPI32					\
 	LIBC_NT_IPHLPAPI					\
+	LIBC_NT_MEMORY						\
 	LIBC_NT_KERNEL32					\
 	LIBC_NT_NTDLL						\
 	LIBC_NT_USER32						\
@@ -92,6 +95,8 @@ EXAMPLES_DIRECTDEPS =						\
 	THIRD_PARTY_TZ						\
 	THIRD_PARTY_VQSORT					\
 	THIRD_PARTY_XED						\
+	THIRD_PARTY_LIBCXXABI					\
+	THIRD_PARTY_LIBUNWIND					\
 	THIRD_PARTY_ZLIB					\
 	TOOL_ARGS						\
 	TOOL_BUILD_LIB						\
@@ -145,6 +150,10 @@ o/$(MODE)/examples/nesemu1.dbg:					\
 o/$(MODE)/examples/picol.o: private				\
 		CPPFLAGS +=					\
 			-DSTACK_FRAME_UNLIMITED
+
+o/$(MODE)/examples/nesemu1.o: private				\
+		CPPFLAGS +=					\
+			-O3
 
 o/$(MODE)/examples/picol.dbg:					\
 		$(EXAMPLES_DEPS)				\

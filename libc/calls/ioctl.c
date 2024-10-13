@@ -18,16 +18,16 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/assert.h"
 #include "libc/calls/internal.h"
-#include "libc/calls/struct/fd.internal.h"
 #include "libc/calls/syscall-sysv.internal.h"
 #include "libc/calls/syscall_support-nt.internal.h"
 #include "libc/calls/termios.h"
 #include "libc/dce.h"
 #include "libc/errno.h"
 #include "libc/intrin/cmpxchg.h"
-#include "libc/intrin/strace.internal.h"
+#include "libc/intrin/fds.h"
+#include "libc/intrin/strace.h"
 #include "libc/intrin/weaken.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/mem/alloca.h"
 #include "libc/mem/mem.h"
 #include "libc/nt/console.h"
@@ -38,6 +38,7 @@
 #include "libc/nt/iphlpapi.h"
 #include "libc/nt/runtime.h"
 #include "libc/nt/struct/ipadapteraddresses.h"
+#include "libc/nt/thunk/msabi.h"
 #include "libc/nt/winsock.h"
 #include "libc/runtime/runtime.h"
 #include "libc/runtime/stack.h"
@@ -59,6 +60,8 @@
 #define MAX_UNICAST_ADDR 32
 #define MAX_NAME_CLASH   ((int)('z' - 'a')) /* Allow a..z */
 
+__msabi extern typeof(__sys_ioctlsocket_nt) *const __imp_ioctlsocket;
+
 static struct HostAdapterInfoNode {
   struct HostAdapterInfoNode *next;
   char name[IFNAMSIZ]; /* Obtained from FriendlyName */
@@ -66,7 +69,7 @@ static struct HostAdapterInfoNode {
   struct sockaddr netmask;
   struct sockaddr broadcast;
   short flags;
-} * __hostInfo;
+} *__hostInfo;
 
 static int ioctl_default(int fd, unsigned long request, void *arg) {
   int rc;
@@ -76,7 +79,7 @@ static int ioctl_default(int fd, unsigned long request, void *arg) {
   } else if (__isfdopen(fd)) {
     if (g_fds.p[fd].kind == kFdSocket) {
       handle = g_fds.p[fd].handle;
-      if ((rc = _weaken(__sys_ioctlsocket_nt)(handle, request, arg)) != -1) {
+      if ((rc = __imp_ioctlsocket(handle, request, arg)) != -1) {
         return rc;
       } else {
         return _weaken(__winsockerr)();
@@ -97,7 +100,7 @@ static int ioctl_fionread(int fd, uint32_t *arg) {
   } else if (__isfdopen(fd)) {
     handle = g_fds.p[fd].handle;
     if (g_fds.p[fd].kind == kFdSocket) {
-      if ((rc = _weaken(__sys_ioctlsocket_nt)(handle, FIONREAD, arg)) != -1) {
+      if ((rc = __imp_ioctlsocket(handle, FIONREAD, arg)) != -1) {
         return rc;
       } else {
         return _weaken(__winsockerr)();
@@ -258,7 +261,10 @@ static textwindows struct HostAdapterInfoNode *appendHostInfo(
     node->flags = flags;
   } else {
     /* Copy from previous node */
-    node->flags = parentInfoNode->flags;
+    if (parentInfoNode)
+      node->flags = parentInfoNode->flags;
+    else
+      node->flags = 0;
   }
 
   ip = ntohl(
@@ -508,6 +514,7 @@ static int ioctl_siocgifconf_sysv(int fd, struct ifconf *ifc) {
   }
 #pragma GCC push_options
 #pragma GCC diagnostic ignored "-Walloca-larger-than="
+#pragma GCC diagnostic ignored "-Wanalyzer-out-of-bounds"
   bufMax = 15000; /* conservative guesstimate */
   b = alloca(bufMax);
   CheckLargeStackAllocation(b, bufMax);

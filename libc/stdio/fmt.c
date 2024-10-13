@@ -39,23 +39,26 @@
 │ THIS SOFTWARE.                                                               │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/assert.h"
+#include "libc/ctype.h"
 #include "libc/errno.h"
 #include "libc/fmt/conv.h"
 #include "libc/fmt/divmod10.internal.h"
+#include "libc/fmt/internal.h"
 #include "libc/fmt/itoa.h"
 #include "libc/intrin/bsr.h"
-#include "libc/intrin/nomultics.internal.h"
-#include "libc/intrin/safemacros.internal.h"
+#include "libc/intrin/nomultics.h"
+#include "libc/intrin/safemacros.h"
 #include "libc/limits.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/math.h"
 #include "libc/mem/mem.h"
 #include "libc/mem/reverse.internal.h"
+#include "libc/runtime/fenv.h"
 #include "libc/runtime/internal.h"
 #include "libc/serialize.h"
 #include "libc/str/str.h"
 #include "libc/str/strwidth.h"
-#include "libc/str/tab.internal.h"
+#include "libc/str/tab.h"
 #include "libc/str/thompike.h"
 #include "libc/str/unicode.h"
 #include "libc/str/utf16.h"
@@ -74,9 +77,9 @@
 #define FLAGS_PRECISION 0x20
 #define FLAGS_ISSIGNED  0x40
 #define FLAGS_NOQUOTE   0x80
-#define FLAGS_QUOTE     FLAGS_SPACE
+#define FLAGS_REPR      0x100
+#define FLAGS_QUOTE     0x200
 #define FLAGS_GROUPING  FLAGS_NOQUOTE
-#define FLAGS_REPR      FLAGS_PLUS
 
 #define __FMT_PUT(C)              \
   do {                            \
@@ -88,7 +91,7 @@
 
 struct FPBits {
   uint32_t bits[4];
-  const FPI *fpi;
+  FPI fpi;
   int sign;
   int ex;  // exponent
   int kind;
@@ -448,7 +451,10 @@ static int __fmt_stoa(int out(const char *, void *, size_t), void *arg,
     } else if (signbit == 15) {
       precision = strnlen16((const char16_t *)p, precision);
     } else {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overread"
       precision = strnlen(p, precision);
+#pragma GCC diagnostic pop
     }
   }
 
@@ -558,7 +564,13 @@ static int __fmt_stoa(int out(const char *, void *, size_t), void *arg,
 
 static void __fmt_dfpbits(union U *u, struct FPBits *b) {
   int ex, i;
-  b->fpi = &kFpiDbl;
+  b->fpi = kFpiDbl;
+
+  // dtoa doesn't need this, unlike gdtoa, but we use it for __fmt_bround
+  i = FLT_ROUNDS;
+  if (i != -1)
+    b->fpi.rounding = i;
+
   b->sign = u->ui[1] & 0x80000000L;
   b->bits[1] = u->ui[1] & 0xfffff;
   b->bits[0] = u->ui[0];
@@ -577,6 +589,7 @@ static void __fmt_dfpbits(union U *u, struct FPBits *b) {
   } else {
     i = STRTOG_Zero;
   }
+  i |= signbit(u->d) ? STRTOG_Neg : 0;
   b->kind = i;
   b->ex = ex - (0x3ff + 52);
 }
@@ -602,7 +615,15 @@ static void __fmt_ldfpbits(union U *u, struct FPBits *b) {
 #else
 #error "unsupported architecture"
 #endif
-  b->fpi = &kFpiLdbl;
+  b->fpi = kFpiLdbl;
+
+  // gdtoa doesn't check for FLT_ROUNDS but for fpi.rounding (which has the
+  // same valid values as FLT_ROUNDS), so handle this here
+  // (we also use this in __fmt_bround now)
+  i = FLT_ROUNDS;
+  if (i != -1)
+    b->fpi.rounding = i;
+
   b->sign = sex & 0x8000;
   if ((ex = sex & 0x7fff) != 0) {
     if (ex != 0x7fff) {
@@ -610,7 +631,7 @@ static void __fmt_ldfpbits(union U *u, struct FPBits *b) {
 #if LDBL_MANT_DIG == 113
       b->bits[3] |= 1 << (112 - 32 * 3);  // set lowest exponent bit
 #endif
-    } else if (b->bits[0] | b->bits[1] | b->bits[2] | b->bits[3]) {
+    } else if (isnan(u->ld)) {
       i = STRTOG_NaN;
     } else {
       i = STRTOG_Infinite;
@@ -621,6 +642,7 @@ static void __fmt_ldfpbits(union U *u, struct FPBits *b) {
   } else {
     i = STRTOG_Zero;
   }
+  i |= signbit(u->ld) ? STRTOG_Neg : 0;
   b->kind = i;
   b->ex = ex - (0x3fff + (LDBL_MANT_DIG - 1));
 #endif
@@ -631,9 +653,9 @@ static int __fmt_fpiprec(struct FPBits *b) {
   const FPI *fpi;
   int i, j, k, m;
   uint32_t *bits;
-  if (b->kind == STRTOG_Zero)
+  if ((b->kind & STRTOG_Retmask) == STRTOG_Zero)
     return (b->ex = 0);
-  fpi = b->fpi;
+  fpi = &b->fpi;
   bits = b->bits;
   for (k = (fpi->nbits - 1) >> 2; k > 0; --k) {
     if ((bits[k >> 3] >> 4 * (k & 7)) & 0xf) {
@@ -672,26 +694,47 @@ static int __fmt_fpiprec(struct FPBits *b) {
 // prec1 = incoming precision (after ".")
 static int __fmt_bround(struct FPBits *b, int prec, int prec1) {
   uint32_t *bits, t;
-  int i, inc, j, k, m, n;
+  int i, j, k, m, n;
+  bool inc = false;
   m = prec1 - prec;
   bits = b->bits;
-  inc = 0;
   k = m - 1;
+
+  // The first two ifs here handle cases where rounding is simple, i.e. where we
+  // always know in which direction we must round because of the current
+  // rounding mode (note that if the correct value for inc is `false` then it
+  // doesn't need to be set as we have already done so above)
+  // They use the FLT_ROUNDS value, which are the same as gdtoa's FPI_Round_*
+  // enum values
+  if (b->fpi.rounding == FPI_Round_zero ||
+      (b->fpi.rounding == FPI_Round_up && b->sign) ||
+      (b->fpi.rounding == FPI_Round_down && !b->sign))
+    goto have_inc;
+  if ((b->fpi.rounding == FPI_Round_up && !b->sign) ||
+      (b->fpi.rounding == FPI_Round_down && b->sign))
+    goto inc_true;
+
+  // Rounding to nearest, ties to even
   if ((t = bits[k >> 3] >> (j = (k & 7) * 4)) & 8) {
     if (t & 7)
-      goto inc1;
-    if (j && bits[k >> 3] << (32 - j))
-      goto inc1;
+      goto inc_true;
+    // ((1 << (j * 4)) - 1) will mask appropriately for the lower bits
+    if ((bits[k >> 3] & ((1 << (j * 4)) - 1)) != 0)
+      goto inc_true;
+    // If exactly halfway and all lower bits are zero (tie), round to even
+    if ((bits[k >> 3] >> (j + 1) * 4) & 1)
+      goto inc_true;
     while (k >= 8) {
       k -= 8;
       if (bits[k >> 3]) {
-      inc1:
-        inc = 1;
-        goto haveinc;
+      inc_true:
+        inc = true;
+        goto have_inc;
       }
     }
   }
-haveinc:
+
+have_inc:
   b->ex += m * 4;
   i = m >> 3;
   k = prec1 >> 3;
@@ -715,7 +758,12 @@ haveinc:
       donothing;
     if (j > k) {
     onebit:
-      bits[0] = 1;
+      // We use 0x10 instead of 1 here to ensure that the digit before the
+      // decimal-point is non-0 (the C standard mandates this, i.e. considers
+      // that printing 0x0.1p+5 is illegal where 0x1.0p+1 is even though both
+      // evaluate to the same value because the first has 0 as the digit before
+      // the decimal-point character)
+      bits[0] = 0x10;
       b->ex += 4 * prec;
       return 1;
     }
@@ -816,7 +864,7 @@ static int __fmt_noop(const char *, void *, size_t) {
  * @asyncsignalsafe if floating point isn't used
  * @vforksafe if floating point isn't used
  */
-int __fmt(void *fn, void *arg, const char *format, va_list va) {
+int __fmt(void *fn, void *arg, const char *format, va_list va, int *wrote) {
   long ld;
   void *p;
   double x;
@@ -1042,9 +1090,10 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
       case 'x':
         log2base = 4;
         goto FormatNumber;
+      case 'B':
       case 'b':
         log2base = 1;
-        alphabet = "0123456789abcdefpb";
+        alphabet = (d == 'b' ? "0123456789abcdefpb" : "0123456789ABCDEFPB");
         goto FormatNumber;
       case 'o':
         log2base = 3;
@@ -1068,6 +1117,9 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
         }
         break;
       }
+      case 'C':
+        signbit = 63;
+        // fallthrough
       case 'c':
         if ((charbuf[0] = va_arg(va, int))) {
           p = charbuf;
@@ -1117,7 +1169,25 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
         }
         break;
       case 'n':
-        __FMT_PUT('\n');
+        switch (signbit) {
+          case 7:
+            *va_arg(va, int8_t *) = *wrote;
+            break;
+          case 15:
+            *va_arg(va, int16_t *) = *wrote;
+            break;
+          case 31:
+            *va_arg(va, int32_t *) = *wrote;
+            break;
+          case 63:
+            *va_arg(va, int64_t *) = *wrote;
+            break;
+          case 127:
+            *va_arg(va, int128_t *) = *wrote;
+            break;
+          default:
+            npassert(false);
+        }
         break;
 
       case 'F':
@@ -1137,11 +1207,13 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
         } else {
           un.ld = va_arg(va, long double);
           __fmt_ldfpbits(&un, &fpb);
-          s = s0 =
-              gdtoa(fpb.fpi, fpb.ex, fpb.bits, &fpb.kind, 3, prec, &decpt, &se);
+          s = s0 = gdtoa(&fpb.fpi, fpb.ex, fpb.bits, &fpb.kind, 3, prec, &decpt,
+                         &se);
         }
-        if (decpt == 9999) {
-        Format9999:
+        if (s0 == NULL)
+          return -1;
+        if (decpt == 9999 || decpt == -32768) {
+        FormatDecpt9999Or32768:
           if (s0)
             freedtoa(s0);
           bzero(special, sizeof(special));
@@ -1153,7 +1225,10 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
           } else if (flags & FLAGS_SPACE) {
             *q++ = ' ';
           }
-          memcpy(q, kSpecialFloats[fpb.kind == STRTOG_NaN][d >= 'a'], 4);
+          memcpy(q,
+                 kSpecialFloats[(fpb.kind & STRTOG_Retmask) == STRTOG_NaN]
+                               [d >= 'a'],
+                 4);
           flags &= ~(FLAGS_PRECISION | FLAGS_PLUS | FLAGS_HASH | FLAGS_SPACE);
           prec = 0;
           rc = __fmt_stoa(out, arg, s, flags, prec, width, signbit, qchar);
@@ -1250,11 +1325,13 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
         } else {
           un.ld = va_arg(va, long double);
           __fmt_ldfpbits(&un, &fpb);
-          s = s0 = gdtoa(fpb.fpi, fpb.ex, fpb.bits, &fpb.kind, prec ? 2 : 0,
+          s = s0 = gdtoa(&fpb.fpi, fpb.ex, fpb.bits, &fpb.kind, prec ? 2 : 0,
                          prec, &decpt, &se);
         }
-        if (decpt == 9999)
-          goto Format9999;
+        if (s0 == NULL)
+          return -1;
+        if (decpt == 9999 || decpt == -32768)
+          goto FormatDecpt9999Or32768;
         c = se - s;
         prec1 = prec;
         if (!prec) {
@@ -1296,11 +1373,13 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
         } else {
           un.ld = va_arg(va, long double);
           __fmt_ldfpbits(&un, &fpb);
-          s = s0 = gdtoa(fpb.fpi, fpb.ex, fpb.bits, &fpb.kind, prec ? 2 : 0,
-                         prec, &decpt, &se);
+          s = s0 = gdtoa(&fpb.fpi, fpb.ex, fpb.bits, &fpb.kind, prec ? 2 : 0,
+                         prec + 1, &decpt, &se);
         }
-        if (decpt == 9999)
-          goto Format9999;
+        if (s0 == NULL)
+          return -1;
+        if (decpt == 9999 || decpt == -32768)
+          goto FormatDecpt9999Or32768;
       FormatExpo:
         if (fpb.sign /* && (x || sign) */)
           sign = '-';
@@ -1379,9 +1458,10 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
           un.d = va_arg(va, double);
           __fmt_dfpbits(&un, &fpb);
         }
-        if (fpb.kind == STRTOG_Infinite || fpb.kind == STRTOG_NaN) {
+        if ((fpb.kind & STRTOG_Retmask) == STRTOG_Infinite ||
+            (fpb.kind & STRTOG_Retmask) == STRTOG_NaN) {
           s0 = 0;
-          goto Format9999;
+          goto FormatDecpt9999Or32768;
         }
         prec1 = __fmt_fpiprec(&fpb);
         if ((flags & FLAGS_PRECISION) && prec < prec1) {
@@ -1397,7 +1477,7 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
             i1 /= 10;
           }
         }
-        if (fpb.sign /* && (sign || fpb.kind != STRTOG_Zero) */) {
+        if (fpb.sign /* && (sign || (fpb.kind & STRTOG_Retmask) != STRTOG_Zero) */) {
           sign = '-';
         }
         if ((width -= bw + 5) > 0) {
@@ -1424,9 +1504,13 @@ int __fmt(void *fn, void *arg, const char *format, va_list va) {
         i1 = prec1 & 7;
         k = prec1 >> 3;
         __FMT_PUT(alphabet[(fpb.bits[k] >> 4 * i1) & 0xf]);
-        if (prec1 > 0 || prec > 0) {
+
+        // decimal-point character appears if the precision isn't 0
+        // or the # flag is specified
+        if (prec1 > 0 || prec > 0 || (flags & FLAGS_HASH)) {
           __FMT_PUT('.');
         }
+
         while (prec1 > 0) {
           if (--i1 < 0) {
             if (--k < 0)

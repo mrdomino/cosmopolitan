@@ -41,7 +41,7 @@ struct SharedMemory {
   atomic_bool ready;
   atomic_bool got_signal;
   atomic_bool handler_returned;
-} * shm;
+} *shm;
 
 void OnSig(int sig) {
   signal(SIGUSR1, SIG_DFL);
@@ -125,8 +125,6 @@ TEST(handkill, thread2thread_async) {
 }
 
 TEST(handkill, process_async) {
-  if (IsWindows())
-    return;
   SPAWN(fork);
   shm->ready = true;
   while (!shm->got_signal)
@@ -142,8 +140,6 @@ TEST(handkill, process_async) {
 }
 
 TEST(handkill, process_pause) {
-  if (IsWindows())
-    return;
   SPAWN(fork);
   shm->ready = true;
   pause();

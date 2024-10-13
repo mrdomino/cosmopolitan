@@ -29,11 +29,10 @@
 #include "libc/calls/syscall_support-sysv.internal.h"
 #include "libc/dce.h"
 #include "libc/errno.h"
-#include "libc/intrin/asan.internal.h"
 #include "libc/intrin/asmflag.h"
-#include "libc/intrin/strace.internal.h"
+#include "libc/intrin/strace.h"
 #include "libc/intrin/weaken.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/nexgen32e/kcpuids.h"
 #include "libc/nexgen32e/rdtsc.h"
 #include "libc/nexgen32e/vendor.internal.h"
@@ -87,19 +86,28 @@ static ssize_t GetRandomBsd(char *p, size_t n, void impl(char *, size_t)) {
   }
 }
 
-static ssize_t GetDevUrandom(char *p, size_t n) {
+static ssize_t GetDevUrandom(char *p, size_t n, unsigned f) {
   int fd;
+  int oflags;
   ssize_t rc;
-  BLOCK_SIGNALS;
-  BLOCK_CANCELATION;
-  fd = sys_openat(AT_FDCWD, "/dev/urandom", O_RDONLY | O_CLOEXEC, 0);
+  const char *dev;
+  BEGIN_CANCELATION_POINT;
+  if (f & GRND_RANDOM) {
+    dev = "/dev/random";
+  } else {
+    dev = "/dev/urandom";
+  }
+  oflags = O_RDONLY | O_CLOEXEC;
+  if (f & GRND_NONBLOCK)
+    oflags |= O_NONBLOCK;
+  fd = sys_openat(AT_FDCWD, dev, oflags, 0);
   if (fd != -1) {
     rc = sys_read(fd, p, n);
+    sys_close(fd);
   } else {
     rc = -1;
   }
-  ALLOW_CANCELATION;
-  ALLOW_SIGNALS;
+  END_CANCELATION_POINT;
   return rc;
 }
 
@@ -123,7 +131,7 @@ ssize_t __getrandom(void *p, size_t n, unsigned f) {
 #endif
   } else {
     BEGIN_CANCELATION_POINT;
-    rc = GetDevUrandom(p, n);
+    rc = GetDevUrandom(p, n, f);
     END_CANCELATION_POINT;
   }
   return rc;
@@ -182,7 +190,7 @@ ssize_t __getrandom(void *p, size_t n, unsigned f) {
  */
 ssize_t getrandom(void *p, size_t n, unsigned f) {
   ssize_t rc;
-  if ((!p && n) || (IsAsan() && !__asan_is_valid(p, n))) {
+  if ((!p && n)) {
     rc = efault();
   } else if (f & ~(GRND_RANDOM | GRND_NONBLOCK)) {
     rc = einval();

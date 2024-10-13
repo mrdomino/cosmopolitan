@@ -30,7 +30,7 @@
 #include "libc/intrin/bswap.h"
 #include "libc/intrin/kprintf.h"
 #include "libc/log/log.h"
-#include "libc/macros.internal.h"
+#include "libc/macros.h"
 #include "libc/mem/alg.h"
 #include "libc/mem/arraylist.internal.h"
 #include "libc/mem/mem.h"
@@ -150,8 +150,6 @@ struct Relas {
     const char *object_path;
   } *p;
 } prtu;
-
-#include "libc/mem/tinymalloc.inc"
 
 static wontreturn void Die(const char *path, const char *reason) {
   tinyprint(2, path, ": ", reason, "\n", NULL);

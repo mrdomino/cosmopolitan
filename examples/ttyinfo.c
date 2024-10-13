@@ -14,6 +14,7 @@
 #include "libc/calls/struct/sigaction.h"
 #include "libc/calls/struct/sigset.h"
 #include "libc/calls/termios.h"
+#include "libc/ctype.h"
 #include "libc/errno.h"
 #include "libc/log/check.h"
 #include "libc/log/log.h"
@@ -160,6 +161,10 @@ void OnSignalThatWillEintrRead(int sig) {
 }
 
 int main(int argc, char *argv[]) {
+
+  // // emacs sends this to enable decckm mode
+  // WRITE(1, "\e[?1049h\e[22;0;0t\e[?12;25h\e[?1h\e=");
+
   int e, c, y, x, n, yn, xn;
   infd = 0;
   outfd = 1;

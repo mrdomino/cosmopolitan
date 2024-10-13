@@ -33,7 +33,7 @@
 #include "libc/errno.h"
 #include "libc/fmt/conv.h"
 #include "libc/intrin/kprintf.h"
-#include "libc/intrin/safemacros.internal.h"
+#include "libc/intrin/safemacros.h"
 #include "libc/limits.h"
 #include "libc/mem/gc.h"
 #include "libc/mem/mem.h"
@@ -262,8 +262,6 @@ void EmptySigHandler(int sig) {
 }
 
 TEST(posix_spawn, etxtbsy) {
-  if (IsWindows())
-    return;  // can't deliver signals between processes
   if (IsXnu())
     return;  // they don't appear impacted by this race condition
   if (IsNetbsd())
